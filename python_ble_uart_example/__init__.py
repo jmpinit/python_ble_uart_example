@@ -3,7 +3,7 @@ import asyncio
 import argparse
 import time
 
-from bleak import BleakClient, discover
+from bleak import BleakClient, BleakScanner
 from bleak.uuids import uuid16_dict
 
 
@@ -17,6 +17,7 @@ class BLEUARTConnection:
 
     async def start(self):
         await self.client.start_notify(self.tx_char, self.rx_callback)
+        print('Listening to notifications on the TX characteristic')
 
     def rx_callback(self, sender: int, data: bytearray):
         self.buffer += data.decode('utf8')
@@ -45,10 +46,12 @@ def get_uart_characteristics(client):
     rx = None
     tx = None
     for characteristic in uart_service.characteristics:
-        if characteristic.description == 'TXD':
+        print('Found characteristic:', characteristic.description)
+
+        if characteristic.description == 'Nordic UART TX':
             tx = characteristic
 
-        if 'write' in characteristic.properties:
+        if characteristic.description == 'Nordic UART RX':
             rx = characteristic
 
         if rx is not None and tx is not None:
@@ -59,25 +62,33 @@ def get_uart_characteristics(client):
 
 async def rxtx(address_or_device):
     async with BleakClient(address_or_device) as client:
-        await client.is_connected()
+        while not client.is_connected:
+            print('Waiting for connection to device')
+            await asyncio.sleep(0.1)
+        #await client.is_connected()
 
         rx, tx = get_uart_characteristics(client)
+        print('Found RX and TX characteristics:', rx, tx)
 
         uart_connection = BLEUARTConnection(client, rx, tx)
         await uart_connection.start()
 
         while True:
-            await uart_connection.send('hello from pc\r\n')
+            #await uart_connection.send('hello from pc\r\n')
             await asyncio.sleep(1)
 
 
 async def scan():
-    for device in await discover():
+    devices = await BleakScanner.discover()
+
+    for device in devices:
         print(f'{device.address}\t{device.name}')
 
 
 async def discover_device_by_name(name):
-    for device in await discover():
+    devices = await BleakScanner.discover()
+
+    for device in devices:
         if device.name == name:
             return device
 
@@ -99,7 +110,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     if args.scan:
-        loop.run_until_complete(scan())
+        asyncio.run(scan())
     else:
         if args.address:
             target = args.address
